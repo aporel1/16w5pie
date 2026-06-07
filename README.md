@@ -68,7 +68,7 @@ Make sure you have [Node.js](https://nodejs.org/) installed on your host machine
     Open your terminal or command prompt in the project root folder and install the required NPM dependencies:
     Bash
 
-    npm install express socket.io qrcode-terminal internal-ip
+    npm install express socket.io qrcode-terminal internal-ip@6.2.0
 
     Start the application:
     Bash
