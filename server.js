@@ -3,15 +3,29 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const qrcode = require('qrcode-terminal');
-const { internalIpV4 } = require('internal-ip');
+const os = require('os'); // <-- Changed: Using Node's native OS module instead of internal-ip
 
 app.use(express.static('public'));
+
+// --- HELPER FUNCTION TO GET LOCAL IP IN WSL/LINUX ---
+function getLocalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            // Filter out loopback (127.0.0.1) and non-IPv4 addresses
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return '127.0.0.1'; // Fallback if no network interface is active
+}
 
 // --- GAME STATE ---
 let players = [];
 let gameInProgress = false;
 let round = 1;
-let votes = {}; // Stores { "voterId": "targetId" }
+let votes = {}; 
 
 const wordPacks = [
     { normal: "BEACH", impostor: "POOL" },
@@ -27,8 +41,6 @@ io.on('connection', (socket) => {
     // 1. CONNECTION AND LOBBY
     socket.on('join', (name) => {
         if (gameInProgress) return;
-        
-        // Register or reset the player upon joining/reconnecting
         players.push({ 
             id: socket.id, 
             name: name, 
@@ -41,22 +53,17 @@ io.on('connection', (socket) => {
 
     // 2. START GAME
     socket.on('startGame', (desiredImpostors) => {
-        if (players.length < 3) return; // Minimum 3 players required
+        if (players.length < 3) return; 
         
         gameInProgress = true;
         round = 1;
         votes = {};
         
-        // Select a random word pack
         const pack = wordPacks[Math.floor(Math.random() * wordPacks.length)];
-        
-        // Shuffle players array randomly
         players.sort(() => Math.random() - 0.5);
 
         players.forEach((player, index) => {
             player.alive = true;
-            
-            // The first N players are assigned as impostors
             if (index < desiredImpostors) {
                 player.role = 'IMPOSTOR';
                 player.isImpostor = true;
@@ -67,7 +74,6 @@ io.on('connection', (socket) => {
                 player.word = pack.normal;
             }
             
-            // Send private game data to each specific player
             io.to(player.id).emit('gameStart', {
                 role: player.role,
                 word: player.word,
@@ -83,25 +89,21 @@ io.on('connection', (socket) => {
     socket.on('vote', (targetId) => {
         if (!gameInProgress) return;
         const voter = players.find(p => p.id === socket.id);
-        
-        // Only living players can vote, and they can change their vote during the round
         if (voter && voter.alive) {
             votes[socket.id] = targetId; 
-            io.emit('someoneVoted', { voterId: socket.id }); // Visual feedback without revealing the choice
+            io.emit('someoneVoted', { voterId: socket.id }); 
         }
     });
 
-    // 4. END VOTING ROUND & CALCULATE RESULTS
+    // 4. END VOTING ROUND
     socket.on('nextRound', () => {
         if (!gameInProgress) return;
 
-        // --- TALLY VOTES ---
         let voteTally = {};
         Object.values(votes).forEach(targetId => {
             voteTally[targetId] = (voteTally[targetId] || 0) + 1;
         });
 
-        // Find the player with the highest vote count
         let mostVotedId = null;
         let maxVotes = 0;
         let tie = false;
@@ -116,9 +118,7 @@ io.on('connection', (socket) => {
             }
         }
 
-        // --- RESOLUTION ---
         let resultMessage = "";
-        
         if (tie || maxVotes === 0 || !mostVotedId) {
             resultMessage = "It's a tie or nobody voted. No one was eliminated.";
         } else {
@@ -129,12 +129,10 @@ io.on('connection', (socket) => {
             }
         }
 
-        // --- CLEANUP AND ADVANCE ---
-        votes = {}; // Reset votes container
+        votes = {}; 
         io.emit('systemMessage', resultMessage);
         io.emit('updateList', players);
 
-        // --- CHECK WIN CONDITIONS ---
         const alivePlayers = players.filter(p => p.alive);
         const aliveImpostors = alivePlayers.filter(p => p.isImpostor).length;
         const aliveNormals = alivePlayers.filter(p => !p.isImpostor).length;
@@ -144,7 +142,6 @@ io.on('connection', (socket) => {
         } else if (aliveImpostors >= aliveNormals) {
             endGame("IMPOSTORS WIN! They have equaled or outnumbered the citizens.");
         } else {
-            // Proceed to next round if no victory conditions are met
             round++;
             io.emit('newRound', round);
         }
@@ -154,7 +151,6 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         players = players.filter(p => p.id !== socket.id);
         io.emit('updateList', players);
-        
         if (players.length === 0) {
             gameInProgress = false;
             votes = {};
@@ -169,9 +165,9 @@ function endGame(message) {
 
 // --- BOOTSTRAP SERVER ---
 const PORT = 3000;
-http.listen(PORT, async () => {
+http.listen(PORT, () => { // <-- Changed: Removed 'async' since we don't await internal-ip anymore
     console.clear();
-    const ip = await internalIpV4();
+    const ip = getLocalIP(); // <-- Instantly resolves native network interfaces
     const url = `http://${ip}:${PORT}`;
     console.log('Impostor Game is running.');
     qrcode.generate(url, { small: true });
