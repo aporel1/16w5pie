@@ -69,6 +69,7 @@ Make sure you have [Node.js](https://nodejs.org/) installed on your host machine
     Bash
 
     npm install express socket.io qrcode-terminal internal-ip@6.2.0
+   (remember to do it as administrator in Windows)
 
     Start the application:
     Bash
